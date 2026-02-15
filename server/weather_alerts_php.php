@@ -187,10 +187,26 @@ function extractAlertData($data) {
     ];
 }
 
-/**
- * Creează HTML-ul hărții
- */
-function createMapHTML($alertsData) {
+    // Încearcă să extrage mesajul din JSON
+    preg_match('/"mesaj":"((?:[^"\\\\]|\\\\.)*)"/', $htmlContent, $mesaj);
+    
+    // Dacă nu e mesaj direct, extrage din "descriereRo" sau construiește din date
+    if (empty($mesaj[1])) {
+        preg_match('/"descriereRo":"((?:[^"\\\\]|\\\\.)*)"/', $htmlContent, $descriere);
+        $mesajHtml = !empty($descriere[1]) ? $descriere[1] : '';
+    } else {
+        $mesajHtml = $mesaj[1];
+    }
+    
+    // Curăță escape characters din mesaj
+    if (!empty($mesajHtml)) {
+        $mesajHtml = str_replace(['\/', '\"', '\\n', '\\r', '\n', '\r'], ['/', '"', ' ', ' ', ' ', ' '], $mesajHtml);
+    }
+    
+    // Dacă NU e mesaj deloc, construiește din fenomene + nivel
+    if (empty($mesajHtml) && !empty($fenomene[1])) {
+        $nivel = !empty($culoareNume[1]) ? $culoareNume[1] : 'Galben';
+        $mesajHtml = "Nivel: " . $nivel . "\nFenomene: " . $fenomene[1]
     if (empty($alertsData['counties'])) {
         return null;
     }
@@ -351,29 +367,47 @@ function createMapHTML($alertsData) {
             onEachFeature: function(feature, layer) {
                 const props = feature.properties;
                 const popupContent = `
-                    <div style="min-width: 300px; max-height: 400px; overflow-y: auto;">
-                        <h3 style="color: #667eea; margin-bottom: 10px;">📍 Județ: \${props.code}</h3>
-                        <hr style="margin: 10px 0;">
-                        <p><strong style="color: #764ba2;">🚨 Nivel Alert:</strong> \${props.alertLevel}</p>
-                        <p><strong style="color: #764ba2;">📋 Tip Alert:</strong> \${props.alertType}</p>
-                        <p><strong style="color: #764ba2;">⚡ Fenomene:</strong> \${props.phenomena}</p>
-                        <p><strong style="color: #764ba2;">⏰ Valabilitate:</strong><br>\${props.start}<br>pana la<br>\${props.end}</p>
-                        <hr style="margin: 10px 0;">
-                        <div style="background: #f0f4ff; padding: 10px; border-radius: 5px; margin-top: 10px;">
-                            <p><strong>📝 Mesaj Detaliat:</strong></p>
-                            <p style="font-size: 0.9em; line-height: 1.5; white-space: pre-wrap;">\${props.message || 'N/A'}</p>
+                    <div style="min-width: 320px; max-height: 450px; overflow-y: auto; font-family: Arial, sans-serif;">
+                        <h3 style="color: #667eea; margin-bottom: 12px; border-bottom: 2px solid #667eea; padding-bottom: 8px;">📍 Județ: \${props.code}</h3>
+                        
+                        <table style="width: 100%; border-collapse: collapse; margin-bottom: 10px;">
+                            <tr style="background: #f0f4ff;">
+                                <td style="padding: 8px; font-weight: bold; color: #764ba2;">🚨 Nivel Alert:</td>
+                                <td style="padding: 8px;">\${props.alertLevel}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; font-weight: bold; color: #764ba2;">📋 Tip Alert:</td>
+                                <td style="padding: 8px;">\${props.alertType}</td>
+                            </tr>
+                            <tr style="background: #f0f4ff;">
+                                <td style="padding: 8px; font-weight: bold; color: #764ba2;">⚡ Fenomene:</td>
+                                <td style="padding: 8px;">\${props.phenomena}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; font-weight: bold; color: #764ba2;">⏰ Valabilitate:</td>
+                                <td style="padding: 8px; font-size: 0.85em;">
+                                    de la: \${props.start}<br>
+                                    pana la: \${props.end}
+                                </td>
+                            </tr>
+                        </table>
+                        
+                        <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 5px; padding: 12px; margin-top: 10px;">
+                            <p style="margin: 0 0 8px 0; font-weight: bold; color: #856404;">📝 Mesaj Detaliat:</p>
+                            <p style="margin: 0; font-size: 0.9em; line-height: 1.6; white-space: pre-wrap; word-break: break-word; color: #333;">\${props.message || 'Nu sunt detalii suplimentare'}</p>
                         </div>
                     </div>
                 `;
-                layer.bindPopup(popupContent, {maxWidth: 400, maxHeight: 500});
+                layer.bindPopup(popupContent, {maxWidth: 500, maxHeight: 500});
                 
-                // Adauga visual feedback la hover
+                // Hover effect
                 layer.on('mouseover', function() {
                     this.setStyle({
                         weight: 3,
-                        fillOpacity: 0.8,
-                        color: '#333'
+                        fillOpacity: 0.85,
+                        color: '#000'
                     });
+                    this.bringToFront();
                 });
                 
                 layer.on('mouseout', function() {
