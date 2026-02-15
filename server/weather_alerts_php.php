@@ -431,8 +431,24 @@ HTML;
  * MAIN
  */
 try {
+    // Debug: Log execution source
+    $source = '';
+    if (php_sapi_name() === 'cli') {
+        $source = "CLI/CRON-JOB";
+    } else {
+        $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown';
+        $remoteIp = $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
+        if (strpos($userAgent, 'cron-job') !== false || strpos($userAgent, 'Bot') !== false) {
+            $source = "CRON-JOB.ORG";
+        } else {
+            $source = "Manual/Browser";
+        }
+        $source .= " (IP: $remoteIp, UA: $userAgent)";
+    }
+    
     logMessage("============================================================", $logFile);
     logMessage("🌦️ START - Generator Hartă Alertă Meteo (PHP Pure Version)", $logFile);
+    logMessage("📡 Source: $source", $logFile);
     
     // Descarcă date
     $data = fetchWeatherAlerts($cacheFile, $logFile);
