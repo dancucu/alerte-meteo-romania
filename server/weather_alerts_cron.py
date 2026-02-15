@@ -15,7 +15,15 @@ import hashlib
 
 # Configurare căi pentru server
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PUBLIC_HTML_DIR = os.path.join(SCRIPT_DIR, '..', 'public_html', 'alerte-meteo')
+
+# Detectează dacă suntem în subdirectorul scripts/ sau direct în root
+if os.path.basename(SCRIPT_DIR) == 'scripts':
+    # Suntem în scripts/, generăm HTML în directorul părinte
+    PUBLIC_HTML_DIR = os.path.dirname(SCRIPT_DIR)
+else:
+    # Suntem în root, generăm în public_html/alerte-meteo
+    PUBLIC_HTML_DIR = os.path.join(SCRIPT_DIR, '..', 'public_html', 'alerte-meteo')
+
 CACHE_FILE = os.path.join(SCRIPT_DIR, 'weather_cache.json')
 OUTPUT_FILE = os.path.join(PUBLIC_HTML_DIR, 'index.html')
 LOG_FILE = os.path.join(SCRIPT_DIR, 'weather_updates.log')
