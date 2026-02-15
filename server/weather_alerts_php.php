@@ -701,34 +701,34 @@ function createMapHTML($alertsData) {
                 
                 const popupContent = `
                     <div style="min-width: 320px; max-height: 500px; overflow-y: auto; font-family: Arial, sans-serif;">
-                        <h3 style="color: #667eea; margin-bottom: 12px; border-bottom: 2px solid #667eea; padding-bottom: 8px;">📍 Județ: ${props.code}</h3>
+                        <h3 style="color: #667eea; margin-bottom: 12px; border-bottom: 2px solid #667eea; padding-bottom: 8px;">📍 Județ: \${props.code}</h3>
                         
                         <table style="width: 100%; border-collapse: collapse; margin-bottom: 10px;">
                             <tr style="background: #f0f4ff;">
                                 <td style="padding: 8px; font-weight: bold; color: #764ba2; width: 40%;">🚨 Nivel:</td>
-                                <td style="padding: 8px;">${props.alertLevel || 'N/A'}</td>
+                                <td style="padding: 8px;">\${props.alertLevel || 'N/A'}</td>
                             </tr>
-                            ${props.alertCode && props.alertCode !== 'necunoscut' ? `<tr>
+                            \${props.alertCode && props.alertCode !== 'necunoscut' ? `<tr>
                                 <td style="padding: 8px; font-weight: bold; color: #764ba2;">📌 Cod:</td>
-                                <td style="padding: 8px;">COD ${props.alertCode.toUpperCase()}</td>
+                                <td style="padding: 8px;">COD \${props.alertCode.toUpperCase()}</td>
                             </tr>` : ''}
                             <tr style="background: #f0f4ff;">
                                 <td style="padding: 8px; font-weight: bold; color: #764ba2;">📋 Tip Alert:</td>
-                                <td style="padding: 8px;">${props.alertType || 'N/A'}</td>
+                                <td style="padding: 8px;">\${props.alertType || 'N/A'}</td>
                             </tr>
-                            ${props.phenomena ? `<tr>
+                            \${props.phenomena ? `<tr>
                                 <td style="padding: 8px; font-weight: bold; color: #764ba2;">⚡ Fenomene:</td>
-                                <td style="padding: 8px;">${props.phenomena}</td>
+                                <td style="padding: 8px;">\${props.phenomena}</td>
                             </tr>` : ''}
                             <tr style="background: #f0f4ff;">
                                 <td style="padding: 8px; font-weight: bold; color: #764ba2;">⏰ Valabilitate:</td>
-                                <td style="padding: 8px; font-size: 0.85em;">${dateHTML}</td>
+                                <td style="padding: 8px; font-size: 0.85em;">\${dateHTML}</td>
                             </tr>
                         </table>
                         
-                        ${props.message ? `<div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 5px; padding: 12px; margin-top: 10px;">
+                        \${props.message ? `<div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 5px; padding: 12px; margin-top: 10px;">
                             <p style="margin: 0 0 8px 0; font-weight: bold; color: #856404;">📝 Situația pentru acest județ:</p>
-                            <p style="margin: 0; font-size: 0.9em; line-height: 1.6; white-space: pre-wrap; word-break: break-word; color: #333;">${props.message}</p>
+                            <p style="margin: 0; font-size: 0.9em; line-height: 1.6; white-space: pre-wrap; word-break: break-word; color: #333;">\${props.message}</p>
                         </div>` : '<p style="color: #666; font-size: 0.9em;">ℹ️ Nu sunt alerte specifice pentru acest județ în această perioadă.</p>'}
                     </div>
                 `;
