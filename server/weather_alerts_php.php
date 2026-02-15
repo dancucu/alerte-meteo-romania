@@ -190,14 +190,23 @@ function fetchWeatherAlerts($cacheFile, $logFile) {
 }
 
 /**
- * Extrage mesaje specifice PER SECTOR (care conțin mai multe județe)
- * Parse HTML pentru mesaje care listează județele: "în județele XX, YY, ZZ, ... mesaj..."
- * EXEMPLU: "în județele Vaslui, Galați, ..., Brăila, ... vântul va avea intensificări..."
+ * Parseaza API și extrage blocuri de alertă separate cu județele afectate
+ * Returnează array cu alertele parseate: fiecare alert conține județele și mesajul specific
  */
-function extractPerCountyMessages($htmlContent) {
-    $perCountyMessages = [];
+function parseAlertsBlocks($htmlContent) {
+    $alerts = [];
     
-    // Mapare nume județe → coduri (FIXME: completează cu toate 42 județele)
+    // Regex pentru a separa blocuri de alertă
+    // Pattern: "INFORMARE|ATENȚIONARE ... COD [GALBEN/PORTOCALIU/ROȘU] ... Interval ... Fenomene ... [Zone sau județe] ... [Mesaj]"
+    
+    // Split by major alert blocks - cauta "INFORMARE" sau "ATENȚIONARE"
+    $blocks = preg_split(
+        '/(?=(?:INFORMARE|ATENȚIONARE)\s+)/i',
+        $htmlContent,
+        -1,
+        PREG_SPLIT_NO_EMPTY
+    );
+    
     $countyMap = [
         'Vaslui' => 'VS', 'Galați' => 'GL', 'Vrancea' => 'VN', 'Tulcea' => 'TL',
         'Constanța' => 'CT', 'Brăila' => 'BR', 'Ialomița' => 'IL', 'Călărași' => 'CL',
@@ -208,57 +217,119 @@ function extractPerCountyMessages($htmlContent) {
         'Mureș' => 'MS', 'Sibiu' => 'SB', 'Alba' => 'AB', 'Brașov' => 'BV',
         'Suceava' => 'SV', 'Botoșani' => 'BT', 'Iași' => 'IS', 'Neamț' => 'NT',
         'Bacău' => 'BC', 'Gorj' => 'GJ', 'Bistrița-Năsăud' => 'BN', 'Covasna' => 'CV',
-        'Maramureș' => 'MM', 'Cluj' => 'CJ', 'Bucharest' => 'B', 'Ilfov' => 'IF'
+        'Cluj' => 'CJ', 'Bucharest' => 'B', 'Ilfov' => 'IF', 'Timiș' => 'TM'
     ];
     
-    // Pattern: extrage blocurile de mesaje și lista de județe
-    // Căutăm: "... în județele XXX, YYY, ZZZ ... [descrierea fenomenului]"
+    $zoneMap = [
+        'Dobrogea' => ['CT', 'TL'],
+        'estul Munteniei' => ['BR', 'GL', 'VN', 'BZ'],
+        'estul României' => ['VS', 'GL', 'VN', 'TL', 'CT', 'BR', 'BZ', 'BT', 'IS'],
+        'muntenia' => ['AG', 'DB', 'PH', 'BZ', 'IL', 'CL', 'GR', 'TR', 'BR'],
+        'bucurești' => ['B', 'IF'],
+        'zona de munte' => ['AG', 'DB', 'BV', 'SB', 'AB', 'BN', 'HD', 'CS'],
+    ];
     
-    // Pattern mai generic - cauta linii cu "în județele" urmată de listă
-    preg_match_all(
-        '/în\s+județele\s+([^.!]*?)(?:\s+(?:,|temporar|vor|va|și|se|treptat|izolat|cu))/i',
-        $htmlContent,
-        $matches,
-        PREG_SET_ORDER
-    );
-    
-    foreach ($matches as $match) {
-        $countiesStr = $match[1];
+    foreach ($blocks as $blockIdx => $block) {
+        $alert = [
+            'type' => '',
+            'code' => '',
+            'interval' => '',
+            'phenomena' => '',
+            'zones' => '',
+            'message' => '',
+            'counties' => [],
+            'alertInfo' => []
+        ];
         
-        // Split pe virgulă și "și" pentru a extrage listă de județe
-        $countiesStr = str_replace(' și ', ',', $countiesStr);
-        $countiesArray = array_map('trim', explode(',', $countiesStr));
+        // Extrage tipul alertei
+        if (preg_match('/^(INFORMARE|ATENȚIONARE)\s+METEOROLOGICĂ/i', $block, $typeMatch)) {
+            $alert['type'] = $typeMatch[1];
+        }
         
-        // Mesajul complet e din pozitia "în județele" până la finalul sensului
-        // Extragem context mai larg
-        $startPos = strpos($htmlContent, $match[0]);
-        if ($startPos !== false) {
-            $contextStart = max(0, $startPos - 500); // 500 chars inainte
-            $contextEnd = min(strlen($htmlContent), $startPos + 1000); // 1000 chars dupa
-            $context = substr($htmlContent, $contextStart, $contextEnd - $contextStart);
+        // Extrage codul de culoare
+        if (preg_match('/COD\s+(GALBEN|PORTOCALIU|ROȘU)/i', $block, $codeMatch)) {
+            $alert['code'] = $codeMatch[1];
+        }
+        
+        // Extrage interval
+        if (preg_match('/Interval de valabilitate:\s*([^\n]*?(?:\d{1,2}\s+\w+,\s+ora\s+\d{2}:\d{2}[^,]*)+)/i', 
+            $block, $intervalMatch)) {
+            $alert['interval'] = trim($intervalMatch[1]);
+        }
+        
+        // Extrage fenomene
+        if (preg_match('/Fenomene vizate:\s*([^\n]*?)(?=Zone afectate:|Mesaj:|În interval|$)/is', 
+            $block, $phenoMatch)) {
+            $alert['phenomena'] = trim($phenoMatch[1]);
+        }
+        
+        // Extrage zone afectate
+        if (preg_match('/Zone afectate:\s*([^\n]*?)(?=Mesaj:|În interval|$)/is', 
+            $block, $zoneMatch)) {
+            $alert['zones'] = trim($zoneMatch[1]);
+        }
+        
+        // Extrage mesajul principal și counties from "în județele X, Y, Z..."
+        if (preg_match('/În intervalul menționat,?\s+în\s+județele\s+([^,]*(?:,\s*[^,]+)*?)\s*,?\s+(.+?)(?=În interval|Mesaj:|$)/is', 
+            $block, $messageMatch)) {
             
-            // Extrage zona COMPLETA: de la "Interval" la urmatoarea entrada
-            if (preg_match('/Interval de valabilitate:\s*([^Z]*?)(?=Fenomene vizate:|Zone afectate:|$)/is', $context, $intervalMatch)) {
-                $fullMessage = trim($intervalMatch[1]);
-                // Adauga mesajul intreg la fiecare judet din lista
-                foreach ($countiesArray as $countyName) {
-                    $countyName = trim($countyName);
-                    if (isset($countyMap[$countyName])) {
-                        $code = $countyMap[$countyName];
-                        if (empty($perCountyMessages[$code]) || strlen($fullMessage) > strlen($perCountyMessages[$code])) {
-                            $perCountyMessages[$code] = $fullMessage;
-                        }
-                    }
+            // Parse counties
+            $countiesStr = $messageMatch[1];
+            $countiesStr = str_replace(' și ', ',', $countiesStr);
+            $countiesArray = array_map('trim', explode(',', $countiesStr));
+            
+            $message = trim($messageMatch[2]);
+            $message = preg_replace('/\n\s+/', ' ', $message); // Curăță line breaks
+            
+            $alert['message'] = $message;
+            
+            // Map county names to codes
+            foreach ($countiesArray as $countyName) {
+                $countyName = trim($countyName);
+                if (isset($countyMap[$countyName])) {
+                    $alert['counties'][] = $countyMap[$countyName];
                 }
             }
         }
+        
+        // Dacă nu s-au găsit județe specifice, încearcă din "Zone afectate"
+        if (empty($alert['counties']) && !empty($alert['zones'])) {
+            preg_match_all(
+                '/(' . implode('|', array_keys($zoneMap)) . ')/i',
+                $alert['zones'],
+                $zoneMatches
+            );
+            
+            if (!empty($zoneMatches[0])) {
+                foreach ($zoneMatches[0] as $zone) {
+                    $zoneLower = strtolower($zone);
+                    if (isset($zoneMap[$zoneLower])) {
+                        $alert['counties'] = array_merge($alert['counties'], $zoneMap[$zoneLower]);
+                    }
+                }
+                $alert['counties'] = array_unique($alert['counties']);
+            }
+        }
+        
+        // Extrage info generale din bloc
+        $alert['alertInfo'] = [
+            'type' => $alert['type'],
+            'code' => $alert['code'],
+            'interval' => $alert['interval'],
+            'phenomena' => $alert['phenomena'],
+            'zones' => $alert['zones'],
+        ];
+        
+        if (!empty($alert['interval']) || !empty($alert['phenomena']) || !empty($alert['counties'])) {
+            $alerts[] = $alert;
+        }
     }
     
-    return $perCountyMessages;
+    return $alerts;
 }
 
 /**
- * Extrage date din răspuns - IMPROVED: Parsez mesaje pe sectoare cu județe
+ * Extrage date din răspuns - IMPROVED: Parsez alert blocks separate cu județe específice
  */
 function extractAlertData($data) {
     // Verifică dacă e fallback (HTML) sau API nou (JSON)
@@ -268,13 +339,13 @@ function extractAlertData($data) {
         $htmlContent = json_encode($data);
     }
     
+    // Parse toate blocurile de alertă separat
+    $alertsBlocks = parseAlertsBlocks($htmlContent);
+    
     $judeteData = [];
     $alertInfo = [];
     
-    // STEP 1: Extrage mesaje specifice per județ din listele de județe din HTML
-    $perCountyMessages = extractPerCountyMessages($htmlContent);
-    
-    // STEP 2: Parse județe din răspun (standard pattern)
+    // STEP 1: Parse județe din răspundere (standard pattern - harta counties cu culori)
     preg_match_all('/"cod":"([A-Z]{2})","culoare":"(\d+)","useCoordGis":"true","coordGis":"([^"]+)"/', $htmlContent, $matches, PREG_SET_ORDER);
     
     if (empty($matches)) {
@@ -286,6 +357,7 @@ function extractAlertData($data) {
         ];
     }
     
+    // Inițializează toate județele
     foreach ($matches as $match) {
         $cod = $match[1];
         $culoare = $match[2];
@@ -295,15 +367,55 @@ function extractAlertData($data) {
             $judeteData[$cod] = [
                 'color_code' => $culoare,
                 'coords_gis' => $coordGis,
-                'message' => $perCountyMessages[$cod] ?? '' // Mesaj specific din lista de județe
+                'message' => '',
+                'phenomena' => '',
+                'alert_type' => '',
+                'alert_code' => '',
+                'interval' => '',
             ];
         }
     }
     
-    // STEP 3: Extrage info GLOBALĂ din HTML (interval, fenomene, etc)
+    // STEP 2: Assign mesajele din alertsBlocks DOAR la județele afectate
+    foreach ($alertsBlocks as $alertBlock) {
+        // Pentru fiecare județ în această alertă
+        foreach ($alertBlock['counties'] as $countyCode) {
+            if (isset($judeteData[$countyCode])) {
+                // Construiește mesajul complet
+                $message = $alertBlock['message'];
+                if (!empty($alertBlock['phenomena'])) {
+                    $message = $alertBlock['phenomena'] . (empty($message) ? '' : "\n\n" . $message);
+                }
+                
+                $judeteData[$countyCode]['message'] = $message;
+                $judeteData[$countyCode]['phenomena'] = $alertBlock['phenomena'];
+                $judeteData[$countyCode]['alert_type'] = $alertBlock['type'];
+                $judeteData[$countyCode]['alert_code'] = $alertBlock['code'];
+                $judeteData[$countyCode]['interval'] = $alertBlock['interval'];
+            }
+        }
+    }
     
-    // Extrage interval de valabilitate (ex: "15 februarie, ora 14:00 – 16 februarie, ora 08:00")
-    preg_match('/Interval de valabilitate:\s*([^Z]*?)(?=Fenomene vizate:|$)/is', $htmlContent, $intervalMatch);
+    // STEP 3: Extrage info GLOBALĂ (pentru popups)
+    preg_match('/COD\s+([A-Z]+)/i', $htmlContent, $codeMatch);
+    $colorName = !empty($codeMatch[1]) ? strtolower($codeMatch[1]) : 'galben';
+    
+    // Extrage fenomene GLOBALE
+    preg_match('/Fenomene vizate:\s*([^Z]*?)(?=Zone afectate:|Interval|$)/is', $htmlContent, $fenMatch);
+    $fenomene = !empty($fenMatch[1]) ? trim($fenMatch[1]) : 'conform textelor și hărții';
+    
+    // Tipul alertei (din prima alertă cu ATENȚIONARE)
+    $typeName = 'Atenționare meteorologică';
+    if (preg_match('/INFORMARE/i', $htmlContent)) {
+        $typeName = 'Informare meteorologică';
+    }
+    if (strpos(strtoupper($htmlContent), 'NOWCASTING') !== false) {
+        $typeName = 'Atenționare nowcasting';
+    }
+    
+    // Parse interval global (prima ATENȚIONARE)
+    preg_match('/Interval de valabilitate:\s*([^\n]*?(?:\d{1,2}\s+\w+,\s+ora\s+\d{2}:\d{2}[^,]*)+)/i', 
+        $htmlContent, $intervalMatch);
     $intervalText = !empty($intervalMatch[1]) ? trim($intervalMatch[1]) : '';
     
     // Parsez din interval: data start - data end
@@ -313,7 +425,6 @@ function extractAlertData($data) {
     if (!empty($intervalText)) {
         // Try format: "15 februarie, ora 14:00 – 16 februarie, ora 08:00"
         if (preg_match('/(\d+)\s+(\w+),\s+ora\s+(\d+:\d+)\s*(?:–|-)\s*(\d+)\s+(\w+),\s+ora\s+(\d+:\d+)/', $intervalText, $dateMatch)) {
-            // Transform "15 februarie, ora 14:00" to "2026-02-15T14:00" (year is current year)
             $startDay = $dateMatch[1];
             $startMonth = $dateMatch[2]; // "februarie"
             $startTime = $dateMatch[3]; // "14:00"
@@ -336,45 +447,17 @@ function extractAlertData($data) {
         }
     }
     
-    // Extrage fenomene vizate
-    preg_match('/Fenomene vizate:\s*([^Z]*?)(?=Zone afectate:|Mesaj:|$)/is', $htmlContent, $fenMatch);
-    $fenomene = !empty($fenMatch[1]) ? trim($fenMatch[1]) : 'conform textelor și hărții';
-    
-    // Extrage tip mesaj și culoare
-    preg_match('/COD\s+([A-Z]+)/i', $htmlContent, $codeMatch);
-    $colorName = !empty($codeMatch[1]) ? strtolower($codeMatch[1]) : 'galben';
-    
-    $typeName = 'Atenționare meteorologică';
-    if (strpos(strtoupper($htmlContent), 'NOWCASTING') !== false) {
-        $typeName = 'Atenționare nowcasting';
-    } elseif (strpos(strtoupper($htmlContent), 'INFORMARE') !== false) {
-        $typeName = 'Informare meteorologică';
-    }
-    
-    // Extrage mesajul GLOBAL (dacă nu e specific per județ)
-    preg_match('/Mesaj\s*:\s*([^Z]*?)(?=Interval de valabilitate:|COD|$)/is', $htmlContent, $messageMatch);
-    $globalMessage = !empty($messageMatch[1]) ? trim($messageMatch[1]) : '';
-    
-    // Curăță message
-    $globalMessage = str_replace(['\/', '\"', '\\n', '\\r'], ['/', '"', ' ', ' '], $globalMessage);
-    
-    // Pentru județele care NU au mesaj specific, adaugă mesajul GLOBAL
-    foreach (array_keys($judeteData) as $cod) {
-        if (empty($judeteData[$cod]['message'])) {
-            $judeteData[$cod]['message'] = $globalMessage;
-        }
-    }
+    $alertInfo = [
+        'type' => $typeName,
+        'color_name' => $colorName,
+        'phenomena' => $fenomene,
+        'start' => $dateStart,
+        'end' => $dateEnd,
+    ];
     
     return [
-        'alert_count' => 1,
-        'alert_info' => [
-            'type' => $typeName,
-            'color_name' => $colorName,
-            'phenomena' => $fenomene,
-            'start' => $dateStart,
-            'end' => $dateEnd,
-            'message' => $globalMessage,
-        ],
+        'alert_count' => count($alertsBlocks),
+        'alert_info' => $alertInfo,
         'counties' => $judeteData
     ];
 }
@@ -415,8 +498,16 @@ function createMapHTML($alertsData) {
         
         $colorInfo = $colorMap[$colorCode] ?? $colorMap['0'];
         
-        // Mesaj specific per județ (dacă există, altfel mesaj global)
-        $countyMessage = $countyData['message'] ?? $alertInfo['message'] ?? '';
+        // Mesaj specific per județ (dacă există)
+        $countyMessage = $countyData['message'] ?? '';
+        
+        // Alert type si code: per-county dacă existază, altfel global
+        $alertType = !empty($countyData['alert_type']) ? $countyData['alert_type'] : ($alertInfo['type'] ?? '');
+        $alertCode = !empty($countyData['alert_code']) ? $countyData['alert_code'] : ($alertInfo['color_name'] ?? 'necunoscut');
+        $phenomena = !empty($countyData['phenomena']) ? $countyData['phenomena'] : ($alertInfo['phenomena'] ?? '');
+        $interval = !empty($countyData['interval']) ? $countyData['interval'] : '';
+        $dateStart = !empty($interval) ? $interval : ($alertInfo['start'] ?? '');
+        $dateEnd = $alertInfo['end'] ?? '';
         
         $features[] = [
             'type' => 'Feature',
@@ -424,10 +515,12 @@ function createMapHTML($alertsData) {
                 'code' => $code,
                 'color' => $colorInfo['color'],
                 'alertLevel' => $colorInfo['name'],
-                'alertType' => $alertInfo['type'] ?? '',
-                'phenomena' => $alertInfo['phenomena'] ?? '',
-                'start' => $alertInfo['start'] ?? '',
-                'end' => $alertInfo['end'] ?? '',
+                'alertType' => $alertType,
+                'alertCode' => $alertCode,
+                'phenomena' => $phenomena,
+                'interval' => $interval,
+                'start' => $dateStart,
+                'end' => $dateEnd,
                 'message' => $countyMessage, // Mesaj per județ
             ],
             'geometry' => [
@@ -545,36 +638,49 @@ function createMapHTML($alertsData) {
             },
             onEachFeature: function(feature, layer) {
                 const props = feature.properties;
+                
+                // Construiește valabilitate - dacă avem interval per-county, nu mai arătăm start/end repetate
+                let validityHTML = '';
+                if (props.interval) {
+                    validityHTML = `<td style="padding: 8px; font-size: 0.85em;">\${props.interval}</td>`;
+                } else {
+                    validityHTML = `<td style="padding: 8px; font-size: 0.85em;">
+                        \${props.start ? 'de la: \${props.start}<br>' : ''}
+                        \${props.end ? 'pana la: \${props.end}' : 'N/A'}
+                    </td>`;
+                }
+                
                 const popupContent = `
-                    <div style="min-width: 320px; max-height: 450px; overflow-y: auto; font-family: Arial, sans-serif;">
+                    <div style="min-width: 320px; max-height: 500px; overflow-y: auto; font-family: Arial, sans-serif;">
                         <h3 style="color: #667eea; margin-bottom: 12px; border-bottom: 2px solid #667eea; padding-bottom: 8px;">📍 Județ: \${props.code}</h3>
                         
                         <table style="width: 100%; border-collapse: collapse; margin-bottom: 10px;">
                             <tr style="background: #f0f4ff;">
-                                <td style="padding: 8px; font-weight: bold; color: #764ba2;">🚨 Nivel Alert:</td>
-                                <td style="padding: 8px;">\${props.alertLevel}</td>
+                                <td style="padding: 8px; font-weight: bold; color: #764ba2; width: 40%;">🚨 Nivel:</td>
+                                <td style="padding: 8px;">\${props.alertLevel || 'N/A'}</td>
                             </tr>
-                            <tr>
-                                <td style="padding: 8px; font-weight: bold; color: #764ba2;">📋 Tip Alert:</td>
-                                <td style="padding: 8px;">\${props.alertType}</td>
-                            </tr>
+                            \${props.alertCode ? `<tr>
+                                <td style="padding: 8px; font-weight: bold; color: #764ba2;">📌 Cod:</td>
+                                <td style="padding: 8px;">COD \${props.alertCode.toUpperCase()}</td>
+                            </tr>` : ''}
                             <tr style="background: #f0f4ff;">
+                                <td style="padding: 8px; font-weight: bold; color: #764ba2;">📋 Tip Alert:</td>
+                                <td style="padding: 8px;">\${props.alertType || 'N/A'}</td>
+                            </tr>
+                            \${props.phenomena ? `<tr>
                                 <td style="padding: 8px; font-weight: bold; color: #764ba2;">⚡ Fenomene:</td>
                                 <td style="padding: 8px;">\${props.phenomena}</td>
-                            </tr>
-                            <tr>
+                            </tr>` : ''}
+                            <tr style="background: #f0f4ff;">
                                 <td style="padding: 8px; font-weight: bold; color: #764ba2;">⏰ Valabilitate:</td>
-                                <td style="padding: 8px; font-size: 0.85em;">
-                                    de la: \${props.start}<br>
-                                    pana la: \${props.end}
-                                </td>
+                                \${validityHTML}
                             </tr>
                         </table>
                         
-                        <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 5px; padding: 12px; margin-top: 10px;">
-                            <p style="margin: 0 0 8px 0; font-weight: bold; color: #856404;">📝 Mesaj Detaliat:</p>
-                            <p style="margin: 0; font-size: 0.9em; line-height: 1.6; white-space: pre-wrap; word-break: break-word; color: #333;">\${props.message || 'Nu sunt detalii suplimentare'}</p>
-                        </div>
+                        \${props.message ? `<div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 5px; padding: 12px; margin-top: 10px;">
+                            <p style="margin: 0 0 8px 0; font-weight: bold; color: #856404;">📝 Situația pentru acest județ:</p>
+                            <p style="margin: 0; font-size: 0.9em; line-height: 1.6; white-space: pre-wrap; word-break: break-word; color: #333;">\${props.message}</p>
+                        </div>` : '<p style="color: #666; font-size: 0.9em;">Nu sunt detalii suplimentare pentru acest județ.</p>'}
                     </div>
                 `;
                 layer.bindPopup(popupContent, {maxWidth: 500, maxHeight: 500});
