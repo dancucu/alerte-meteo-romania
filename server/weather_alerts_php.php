@@ -279,14 +279,14 @@ function parseAlertsBlocks($htmlContent) {
         
         $countyPatterns = [
             // Match: "în/În [Zone prefix optional] județele/zona... X, Y, Z..."
-            '/(?:în|În)\s+(?:(?:zona\s+(?:joasă|de\s+munte)\s+)?a\s+)?(?:județele|județe)?\s*([^.!]*?)(?=\s+(?:temporar|vor|va|și|se|treptat|izolat|cu|conform|pentru))',
+            '/(?:în|În)\s+(?:(?:zona\s+(?:joasă|de\s+munte)\s+)?a\s+)?(?:județele|județe)?\s*([^.!]*?)(?=\s+(?:temporar|vor|va|și|se|treptat|izolat|cu|conform|pentru))/i',
             // Match: "în/În X, Y, Z și ..." (direct counties without județele word)
-            '/(?:în|În)\s+([^.!]*?(?:și[^.!]*?)?)(?=\s+(?:temporar|vor|va|conform|pentru|se\s+va|va\s+fi))',
+            '/(?:în|În)\s+([^.!]*?(?:și[^.!]*?)?)(?=\s+(?:temporar|vor|va|conform|pentru|se\s+va|va\s+fi))/i',
         ];
         
         $foundCounties = false;
         foreach ($countyPatterns as $pattern) {
-            if (preg_match($pattern . 'i', $block, $messageMatch)) {
+            if (preg_match($pattern, $block, $messageMatch)) {
                 // Parse counties
                 $countiesStr = $messageMatch[1];
                 $countiesStr = str_replace([' și ', ' si '], ',', $countiesStr);
