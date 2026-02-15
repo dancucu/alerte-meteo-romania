@@ -311,8 +311,9 @@ $publicDir = $baseDir;
             echo "<li>Contactează hosting support pentru activare Python3</li>";
             echo "<li>Verifică că ai urcat toate fișierele corect via FTP</li>";
             echo "<li>Verifică permisiunile directoarelor (755 pentru folders, 644 pentru files)</li>";
-            echo "</ul>";
-            echo "</div>";
+            echo "</ul>";            echo "<br>";
+            echo "<p><strong>🔍 Pentru diagnostic detaliat:</strong></p>";
+            echo "<a href='debug.php' class='button'>🐛 Rulează Debug Tool</a>";            echo "</div>";
         }
         
         if (!empty($warnings)) {
