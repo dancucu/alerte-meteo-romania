@@ -223,10 +223,10 @@ function parseAlertsBlocks($htmlContent) {
     $zoneMap = [
         'Dobrogea' => ['CT', 'TL'],
         'estul Munteniei' => ['BR', 'GL', 'VN', 'BZ'],
-        'estul României' => ['VS', 'GL', 'VN', 'TL', 'CT', 'BR', 'BZ', 'BT', 'IS'],
+        'estul României' => ['VS', 'GL', 'VN', 'TL', 'CT', 'BR', 'BZ', 'BT', 'IS', 'NT', 'BC'],
         'muntenia' => ['AG', 'DB', 'PH', 'BZ', 'IL', 'CL', 'GR', 'TR', 'BR'],
         'bucurești' => ['B', 'IF'],
-        'zona de munte' => ['AG', 'DB', 'BV', 'SB', 'AB', 'BN', 'HD', 'CS'],
+        'zona de munte' => ['AG', 'DB', 'BV', 'SB', 'AB', 'BN', 'HD', 'CS', 'NT', 'BC'],
     ];
     
     foreach ($blocks as $blockIdx => $block) {
@@ -272,36 +272,58 @@ function parseAlertsBlocks($htmlContent) {
         // Log pentru debugging
         error_log("[BLOCK $blockIdx] Type: {$alert['type']}, Code: {$alert['code']}, Phenomena: {$alert['phenomena']}", 3, dirname(__FILE__) . '/debug.log');
         
-        // Extrage mesajul principal și counties from "în județele X, Y, Z..." OR "În județele ..." OR "În zona..."
-        if (preg_match('/(?:în|În)\s+(?:(?:județele|zona\s+(?:joasă|de\s+munte)\s+a\s+)?(?:județele)?)\s*([^.!]*?)(?:\s+(?:temporar|vor|va|și|se|treptat|izolat|cu|,))/i', 
-            $block, $messageMatch)) {
-            
-            // Parse counties
-            $countiesStr = $messageMatch[1];
-            $countiesStr = str_replace(' și ', ',', $countiesStr);
-            $countiesArray = array_map('trim', explode(',', $countiesStr));
-            
-            // Caută mesaj după lista de județe
-            $afterCounties = strpos($block, $messageMatch[0]);
-            if ($afterCounties !== false) {
-                $restOfBlock = substr($block, $afterCounties + strlen($messageMatch[0]));
-                // Extract message until next major section or end
-                if (preg_match('/(.+?)(?=(?:INFORMARE|ATENȚIONARE|Zone afectate|$))/is', $restOfBlock, $msgMatch)) {
-                    $message = trim($msgMatch[1]);
-                    $message = preg_replace('/\n\s+/', ' ', $message);
-                    $alert['message'] = $message;
+        // Extrage mesajul principal și counties from multiple patterns:
+        // Pattern 1: "în județele X, Y, Z..." 
+        // Pattern 2: "În zona joasă/munte a județelor X, Y, Z..."
+        // Pattern 3: "în județe X și Y..." (with "și")
+        
+        $countyPatterns = [
+            // Match: "în/În [Zone prefix optional] județele/zona... X, Y, Z..."
+            '/(?:în|În)\s+(?:(?:zona\s+(?:joasă|de\s+munte)\s+)?a\s+)?(?:județele|județe)?\s*([^.!]*?)(?=\s+(?:temporar|vor|va|și|se|treptat|izolat|cu|conform|pentru))',
+            // Match: "în/În X, Y, Z și ..." (direct counties without județele word)
+            '/(?:în|În)\s+([^.!]*?(?:și[^.!]*?)?)(?=\s+(?:temporar|vor|va|conform|pentru|se\s+va|va\s+fi))',
+        ];
+        
+        $foundCounties = false;
+        foreach ($countyPatterns as $pattern) {
+            if (preg_match($pattern . 'i', $block, $messageMatch)) {
+                // Parse counties
+                $countiesStr = $messageMatch[1];
+                $countiesStr = str_replace([' și ', ' si '], ',', $countiesStr);
+                $countiesArray = array_map('trim', explode(',', $countiesStr));
+                
+                // Try to map counties
+                $tempCounties = [];
+                foreach ($countiesArray as $countyName) {
+                    $countyName = trim($countyName);
+                    // Remove "o zonă" or other qualifiers
+                    $countyName = preg_replace('/^\s*o\s+zonă\s+a\s+/', '', $countyName);
+                    if (!empty($countyName) && isset($countyMap[$countyName])) {
+                        $tempCounties[] = $countyMap[$countyName];
+                    }
+                }
+                
+                if (!empty($tempCounties)) {
+                    $alert['counties'] = array_unique(array_merge($alert['counties'], $tempCounties));
+                    $foundCounties = true;
+                    
+                    // Extract message after county list
+                    $afterCounties = strpos($block, $messageMatch[0]);
+                    if ($afterCounties !== false) {
+                        $restOfBlock = substr($block, $afterCounties + strlen($messageMatch[0]));
+                        if (preg_match('/(.+?)(?=(?:INFORMARE|ATENȚIONARE|Zone afectate|$))/is', $restOfBlock, $msgMatch)) {
+                            $message = trim($msgMatch[1]);
+                            $message = preg_replace('/\n\s+/', ' ', $message);
+                            if (!empty($message)) {
+                                $alert['message'] = $message;
+                            }
+                        }
+                    }
+                    
+                    error_log("[BLOCK $blockIdx] Counties found via text: " . json_encode($alert['counties']), 3, dirname(__FILE__) . '/debug.log');
+                    break; // Found counties, stop trying patterns
                 }
             }
-            
-            // Map county names to codes
-            foreach ($countiesArray as $countyName) {
-                $countyName = trim($countyName);
-                if (isset($countyMap[$countyName])) {
-                    $alert['counties'][] = $countyMap[$countyName];
-                }
-            }
-            
-            error_log("[BLOCK $blockIdx] Counties found via text: " . json_encode($alert['counties']), 3, dirname(__FILE__) . '/debug.log');
         }
         
         // Dacă nu s-au găsit județe specifice, încearcă din "Zone afectate"
