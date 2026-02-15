@@ -186,11 +186,27 @@ function extractAlertData($data) {
     preg_match('/"fenomeneVizate":"([^"]+)"/', $htmlContent, $fenomene);
     preg_match('/"dataAparitiei":"([^"]+)"/', $htmlContent, $dataAparitie);
     preg_match('/"dataExpir[^"]*":"([^"]+)"/', $htmlContent, $dataExpirare);
+    
+    // Încearcă să extrage mesajul din JSON
     preg_match('/"mesaj":"((?:[^"\\\\]|\\\\.)*)"/', $htmlContent, $mesaj);
     
-    $mesajHtml = '';
-    if (!empty($mesaj[1])) {
-        $mesajHtml = str_replace(['\/', '\"', '\n', '\r'], ['/', '"', '', ''], $mesaj[1]);
+    // Dacă nu e mesaj direct, extrage din "descriereRo" sau construiește din date
+    if (empty($mesaj[1])) {
+        preg_match('/"descriereRo":"((?:[^"\\\\]|\\\\.)*)"/', $htmlContent, $descriere);
+        $mesajHtml = !empty($descriere[1]) ? $descriere[1] : '';
+    } else {
+        $mesajHtml = $mesaj[1];
+    }
+    
+    // Curăță escape characters din mesaj
+    if (!empty($mesajHtml)) {
+        $mesajHtml = str_replace(['\/', '\"', '\\n', '\\r', '\n', '\r'], ['/', '"', ' ', ' ', ' ', ' '], $mesajHtml);
+    }
+    
+    // Dacă NU e mesaj deloc, construiește din fenomene + nivel
+    if (empty($mesajHtml) && !empty($fenomene[1])) {
+        $nivel = !empty($culoareNume[1]) ? $culoareNume[1] : 'Galben';
+        $mesajHtml = "Nivel: " . $nivel . "\nFenomene: " . $fenomene[1];
     }
     
     return [
