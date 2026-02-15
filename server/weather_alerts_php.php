@@ -351,15 +351,38 @@ function createMapHTML($alertsData) {
             onEachFeature: function(feature, layer) {
                 const props = feature.properties;
                 const popupContent = `
-                    <div style="min-width: 250px;">
-                        <h3>Județ: \${props.code}</h3>
-                        <p><strong>Nivel:</strong> \${props.alertLevel}</p>
-                        <p><strong>Tip:</strong> \${props.alertType}</p>
-                        <p><strong>Fenomene:</strong> \${props.phenomena}</p>
-                        <p><strong>Valabilitate:</strong><br>\${props.start} - \${props.end}</p>
+                    <div style="min-width: 300px; max-height: 400px; overflow-y: auto;">
+                        <h3 style="color: #667eea; margin-bottom: 10px;">📍 Județ: \${props.code}</h3>
+                        <hr style="margin: 10px 0;">
+                        <p><strong style="color: #764ba2;">🚨 Nivel Alert:</strong> \${props.alertLevel}</p>
+                        <p><strong style="color: #764ba2;">📋 Tip Alert:</strong> \${props.alertType}</p>
+                        <p><strong style="color: #764ba2;">⚡ Fenomene:</strong> \${props.phenomena}</p>
+                        <p><strong style="color: #764ba2;">⏰ Valabilitate:</strong><br>\${props.start}<br>pana la<br>\${props.end}</p>
+                        <hr style="margin: 10px 0;">
+                        <div style="background: #f0f4ff; padding: 10px; border-radius: 5px; margin-top: 10px;">
+                            <p><strong>📝 Mesaj Detaliat:</strong></p>
+                            <p style="font-size: 0.9em; line-height: 1.5; white-space: pre-wrap;">\${props.message || 'N/A'}</p>
+                        </div>
                     </div>
                 `;
-                layer.bindPopup(popupContent);
+                layer.bindPopup(popupContent, {maxWidth: 400, maxHeight: 500});
+                
+                // Adauga visual feedback la hover
+                layer.on('mouseover', function() {
+                    this.setStyle({
+                        weight: 3,
+                        fillOpacity: 0.8,
+                        color: '#333'
+                    });
+                });
+                
+                layer.on('mouseout', function() {
+                    this.setStyle({
+                        weight: 2,
+                        fillOpacity: 0.6,
+                        color: '#333'
+                    });
+                });
             }
         }).addTo(map);
     </script>
