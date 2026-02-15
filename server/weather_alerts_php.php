@@ -1,6 +1,7 @@
 <?php
 /**
  * Generator Hartă Avertizări Meteo România - Versiune PHP Pură
+ * CACHE-ONLY MODE: Doar API oficial + cache (fără fallback)
  * Fără dependențe Python - funcționează cu PHP 7.0+
  * © 2026 TazzStudio.ro
  */
@@ -86,14 +87,14 @@ function parseMultipolygon($coordString) {
 }
 
 /**
- * Descarcă alertele meteo cu fallback triplu
+ * Descarcă alertele meteo cu fallback pe cache
+ * Versiune Cache-Only - fără fallback pe alte API-uri
  */
 function fetchWeatherAlerts($cacheFile, $logFile) {
     $apiUrl = "https://www.meteoromania.ro/wp-json/meteoapi/v2/avertizari-generale";
-    $fallbackUrl = "https://tazzstudio.ro/avertizari-meteo.php";
     
     // NIVEL 1: API Oficial
-    logMessage("🌐 [1/3] Încerc API oficial: $apiUrl", $logFile);
+    logMessage("🌐 Încerc API oficial: $apiUrl", $logFile);
     
     $ch = curl_init($apiUrl);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -115,39 +116,18 @@ function fetchWeatherAlerts($cacheFile, $logFile) {
     
     logMessage("⚠️ API oficial returnează cod $httpCode", $logFile);
     
-    // NIVEL 2: Cache
+    // NIVEL 2: Cache (ultima opțiune)
     if (file_exists($cacheFile)) {
-        logMessage("📂 [2/3] Încerc cache: $cacheFile", $logFile);
+        logMessage("📂 Încerc cache: $cacheFile", $logFile);
         $cacheContent = file_get_contents($cacheFile);
         $data = json_decode($cacheContent, true);
         if ($data) {
-            logMessage("✅ Date încărcate din cache", $logFile);
+            logMessage("✅ Date încărcate din cache (OFFLINE MODE)", $logFile);
             return $data;
         }
     }
     
-    logMessage("⚠️ Nu există cache valid", $logFile);
-    
-    // NIVEL 3: API Fallback
-    logMessage("🔄 [3/3] Încerc API fallback: $fallbackUrl", $logFile);
-    
-    $ch = curl_init($fallbackUrl);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-    $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    
-    if ($httpCode === 200 && $response) {
-        logMessage("✅ API fallback disponibil", $logFile);
-        $fallbackData = ['source' => 'fallback', 'html' => $response];
-        file_put_contents($cacheFile, json_encode($fallbackData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-        logMessage("💾 Date fallback salvate în cache", $logFile);
-        return $fallbackData;
-    }
-    
-    logMessage("❌ Toate sursele sunt indisponibile", $logFile);
+    logMessage("❌ API indisponibil și nu există cache valid", $logFile);
     throw new Exception("API indisponibil și fără cache valid");
 }
 
