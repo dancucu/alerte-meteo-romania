@@ -18,6 +18,8 @@ pip install requests pyproj shapely numpy
 
 ## 🎯 Utilizare
 
+### 💻 Local (Desktop)
+
 ```bash
 python3 weather_alerts_map.py
 ```
@@ -29,6 +31,23 @@ Scriptul va:
 4. Va genera fișierul `weather_alerts_map.html` cu harta interactivă
 5. Va deschide automat harta în browser
 6. Va monitoriza API-ul la fiecare 5 minute
+
+### 🌐 Server (Productie)
+
+Pentru deployment pe server web (ex: tazzstudio.ro/alerte-meteo):
+
+1. Urcă fișierele din directorul `server/` pe serverul tău
+2. Rulează scriptul de instalare:
+
+```bash
+cd server
+chmod +x install.sh
+./install.sh
+```
+
+3. Sau instalează manual - vezi [server/README_SERVER.md](server/README_SERVER.md)
+
+**Live demo:** https://tazzstudio.ro/alerte-meteo/
 
 ## 🛑 Oprire
 

@@ -1,0 +1,76 @@
+# .htaccess pentru directorul alerte-meteo
+# Configurări Apache pentru site-ul public
+
+# Activează DirectoryIndex
+DirectoryIndex index.html index.php
+
+# Setări cache pentru performanță
+<IfModule mod_expires.c>
+    ExpiresActive On
+    
+    # HTML se actualizează frecvent
+    ExpiresByType text/html "access plus 5 minutes"
+    
+    # CSS și JavaScript
+    ExpiresByType text/css "access plus 1 week"
+    ExpiresByType application/javascript "access plus 1 week"
+    
+    # Imagini
+    ExpiresByType image/jpeg "access plus 1 month"
+    ExpiresByType image/png "access plus 1 month"
+    ExpiresByType image/gif "access plus 1 month"
+    ExpiresByType image/svg+xml "access plus 1 month"
+</IfModule>
+
+# Compresia Gzip
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html
+    AddOutputFilterByType DEFLATE text/css
+    AddOutputFilterByType DEFLATE text/javascript
+    AddOutputFilterByType DEFLATE application/javascript
+    AddOutputFilterByType DEFLATE application/json
+</IfModule>
+
+# Securitate - ascunde informații server
+<IfModule mod_headers.c>
+    # Protecție XSS
+    Header set X-XSS-Protection "1; mode=block"
+    
+    # Previne MIME sniffing
+    Header set X-Content-Type-Options "nosniff"
+    
+    # Frame options
+    Header set X-Frame-Options "SAMEORIGIN"
+    
+    # Referrer policy
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# Erori custom (opțional)
+ErrorDocument 404 /alerte-meteo/index.html
+ErrorDocument 500 /alerte-meteo/index.html
+
+# Previne listarea directoarelor
+Options -Indexes
+
+# Protecție fișiere sensibile
+<FilesMatch "\.(log|json|py|sh)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Permite accesul la HTML și PHP
+<FilesMatch "\.(html|php)$">
+    Order allow,deny
+    Allow from all
+</FilesMatch>
+
+# Rewrite rules (opțional - necesită mod_rewrite)
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /alerte-meteo/
+    
+    # Forțează HTTPS (dacă dorești)
+    # RewriteCond %{HTTPS} off
+    # RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+</IfModule>

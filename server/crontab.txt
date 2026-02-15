@@ -1,0 +1,4 @@
+# Crontab pentru actualizare automată hartă meteo
+# Rulează la fiecare 5 minute
+
+*/5 * * * * cd /home/username/weather-scripts && /usr/bin/python3 weather_alerts_cron.py >> weather_cron.log 2>&1
