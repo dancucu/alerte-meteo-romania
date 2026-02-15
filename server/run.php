@@ -13,7 +13,8 @@ header('Content-Type: text/html; charset=utf-8');
 // Configurare căi
 $baseDir = dirname(__FILE__);
 $scriptsDir = $baseDir . '/scripts';
-$pythonScript = $scriptsDir . '/weather_alerts_cron.py';
+$phpScript = $baseDir . '/weather_alerts_php.php';  // Noul script PHP pur
+$pythonScript = $scriptsDir . '/weather_alerts_cron.py';  // Script Python (backup)
 
 // Găsește Python
 $pythonPath = null;
@@ -33,6 +34,10 @@ foreach ($possiblePaths as $path) {
         break;
     }
 }
+
+// Determină ce script să folosim: PHP pur (prioritate) sau Python (dacă există)
+$usePhpScript = file_exists($phpScript);
+$usePythonScript = $pythonPath && file_exists($pythonScript);
 
 $action = isset($_GET['action']) ? $_GET['action'] : 'show';
 
@@ -122,21 +127,28 @@ $action = isset($_GET['action']) ? $_GET['action'] : 'show';
             </div>
 
             <?php
-            if (!$pythonPath) {
+            if (!$usePhpScript && !$usePythonScript) {
                 echo '<div class="status error">';
-                echo '<h3>❌ Eroare: Python nu a fost găsit</h3>';
-                echo '<p>Contactează hosting support pentru activare Python3</p>';
-                echo '</div>';
-            } elseif (!file_exists($pythonScript)) {
-                echo '<div class="status error">';
-                echo '<h3>❌ Eroare: Scriptul Python lipsește</h3>';
-                echo '<p>Verifică că ai urcat <code>weather_alerts_cron.py</code> în directorul <code>scripts/</code></p>';
+                echo '<h3>❌ Eroare: Niciun script disponibil</h3>';
+                echo '<p>Verifică că ai urcat fișierele corect:</p>';
+                echo '<ul style="margin-left: 20px;">';
+                echo '<li><code>weather_alerts_php.php</code> (versiune PHP pură - recomandat)</li>';
+                echo '<li>SAU <code>scripts/weather_alerts_cron.py</code> (versiune Python)</li>';
+                echo '</ul>';
                 echo '</div>';
             } else {
-                // Rulează scriptul
-                $command = "cd " . escapeshellarg($scriptsDir) . " && " . 
-                          escapeshellarg($pythonPath) . " " . 
-                          escapeshellarg(basename($pythonScript)) . " 2>&1";
+                // Prioritate: PHP > Python
+                if ($usePhpScript) {
+                    // Rulează scriptul PHP
+                    $command = "/usr/bin/php " . escapeshellarg($phpScript) . " 2>&1";
+                    $scriptType = "PHP Pure Version";
+                } else {
+                    // Rulează scriptul Python
+                    $command = "cd " . escapeshellarg($scriptsDir) . " && " . 
+                              escapeshellarg($pythonPath) . " " . 
+                              escapeshellarg(basename($pythonScript)) . " 2>&1";
+                    $scriptType = "Python Version";
+                }
                 
                 $startTime = microtime(true);
                 $output = shell_exec($command);
@@ -151,6 +163,7 @@ $action = isset($_GET['action']) ? $_GET['action'] : 'show';
                     
                     echo '<div class="status success">';
                     echo '<h3>✅ Actualizare completă cu succes!</h3>';
+                    echo '<p><strong>Script folosit:</strong> ' . $scriptType . '</p>';
                     echo '<p><strong>Durată:</strong> ' . $duration . ' secunde</p>';
                     echo '<p><strong>Hartă:</strong> ' . number_format($fileSize, 2) . ' KB</p>';
                     echo '<p><strong>Modificată:</strong> ' . $fileTime . '</p>';
@@ -181,11 +194,24 @@ $action = isset($_GET['action']) ? $_GET['action'] : 'show';
             
             <div class="status info">
                 <h3>ℹ️ Informații Sistem</h3>
+                <p><strong>Script disponibil:</strong> 
+                    <?php 
+                    if ($usePhpScript) {
+                        echo "✅ PHP Pure Version (recomandat)";
+                    } elseif ($usePythonScript) {
+                        echo "✅ Python Version";
+                    } else {
+                        echo "❌ Niciun script disponibil";
+                    }
+                    ?>
+                </p>
+                <?php if ($usePythonScript): ?>
                 <p><strong>Python:</strong> 
                     <?php echo $pythonPath ? "✅ $pythonPath" : "❌ Nu a fost găsit"; ?>
                 </p>
-                <p><strong>Script:</strong> 
-                    <?php echo file_exists($pythonScript) ? "✅ Există" : "❌ Lipsește"; ?>
+                <?php endif; ?>
+                <p><strong>PHP Script:</strong> 
+                    <?php echo file_exists($phpScript) ? "✅ Există" : "❌ Lipsește"; ?>
                 </p>
                 <?php
                 $htmlFile = $baseDir . '/index.html';
