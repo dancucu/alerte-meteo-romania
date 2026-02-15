@@ -36,6 +36,44 @@ function webMercatorToWGS84($x, $y) {
 }
 
 /**
+ * Formează data în format uman pentru România
+ * Input: "2026-02-14T10:00" -> Output: "14 februarie 2026, ora 10:00"
+ */
+function formatDateRO($dateString) {
+    if (empty($dateString)) {
+        return 'N/A';
+    }
+    
+    // Fix data invalida ca "2026-02-16T80:00" (80:00 nu e valabil)
+    $dateString = preg_replace('/T(\d{2}):/', 'T00:', $dateString); // Replace invalid hours with 00
+    
+    try {
+        $date = DateTime::createFromFormat('Y-m-d\TH:i', $dateString);
+        if ($date === false) {
+            return $dateString;
+        }
+        
+        $lunile = [
+            1 => 'ianuarie', 2 => 'februarie', 3 => 'martie', 4 => 'aprilie',
+            5 => 'mai', 6 => 'iunie', 7 => 'iulie', 8 => 'august',
+            9 => 'septembrie', 10 => 'octombrie', 11 => 'noiembrie', 12 => 'decembrie'
+        ];
+        
+        $day = $date->format('d');
+        $month = $lunile[(int)$date->format('m')];
+        $year = $date->format('Y');
+        $time = $date->format('H:i');
+        
+        // Remove leading zero from day
+        $day = ltrim($day, '0') ?: '0';
+        
+        return "$day $month $year, ora $time";
+    } catch (Exception $e) {
+        return $dateString;
+    }
+}
+
+/**
  * Parse coordonate MULTIPOLYGON
  */
 function parseMultipolygon($coordString) {
@@ -215,8 +253,8 @@ function extractAlertData($data) {
             'type' => $tipMesaj[1] ?? 'Atenționare meteorologică',
             'color_name' => $culoareNume[1] ?? 'galben',
             'phenomena' => $fenomene[1] ?? 'conform textelor și hărții',
-            'start' => $dataAparitie[1] ?? '',
-            'end' => $dataExpirare[1] ?? '',
+            'start' => formatDateRO($dataAparitie[1] ?? ''),
+            'end' => formatDateRO($dataExpirare[1] ?? ''),
             'message' => $mesajHtml,
         ],
         'counties' => $judeteData
