@@ -344,6 +344,7 @@ function extractAlertData($data) {
     
     $judeteData = [];
     $alertInfo = [];
+    $informareBlock = null;  // Salvez INFORMARE separat pentru aplicare la sfarsit
     
     // STEP 1: Parse județe din răspundere (standard pattern - harta counties cu culori)
     preg_match_all('/"cod":"([A-Z]{2})","culoare":"(\d+)","useCoordGis":"true","coordGis":"([^"]+)"/', $htmlContent, $matches, PREG_SET_ORDER);
@@ -377,43 +378,75 @@ function extractAlertData($data) {
     }
     
     // STEP 2: Assign mesajele din alertsBlocks DOAR la județele afectate
+    // Prioritate: ATENȚIONARE > INFORMARE
     foreach ($alertsBlocks as $alertBlock) {
+        // Dacă e INFORMARE și nu are județe specifice, salvez pentru mai tarziu
+        if ($alertBlock['type'] === 'INFORMARE' && empty($alertBlock['counties'])) {
+            $informareBlock = $alertBlock;
+            continue;  // Skip INFORMARE fără județe specifice, o voi aplica la sfarsit
+        }
+        
         // Pentru fiecare județ în această alertă
         foreach ($alertBlock['counties'] as $countyCode) {
             if (isset($judeteData[$countyCode])) {
-                // Construiește mesajul complet
-                $message = $alertBlock['message'];
-                if (!empty($alertBlock['phenomena'])) {
-                    $message = $alertBlock['phenomena'] . (empty($message) ? '' : "\n\n" . $message);
+                // Doar dacă pătratul nu are deja un mesaj mai specific (ATENȚIONARE)
+                if (empty($judeteData[$countyCode]['alert_type']) || 
+                    $judeteData[$countyCode]['alert_type'] === 'INFORMARE' ||
+                    (strpos($judeteData[$countyCode]['alert_type'], 'ATENȚIONARE') === false && $alertBlock['type'] === 'ATENȚIONARE')) {
+                    
+                    // Construiește mesajul complet
+                    $message = $alertBlock['message'];
+                    if (!empty($alertBlock['phenomena'])) {
+                        $message = $alertBlock['phenomena'] . (empty($message) ? '' : "\n\n" . $message);
+                    }
+                    
+                    $judeteData[$countyCode]['message'] = $message;
+                    $judeteData[$countyCode]['phenomena'] = $alertBlock['phenomena'];
+                    $judeteData[$countyCode]['alert_type'] = $alertBlock['type'];
+                    $judeteData[$countyCode]['alert_code'] = $alertBlock['code'];
+                    $judeteData[$countyCode]['interval'] = $alertBlock['interval'];
                 }
-                
-                $judeteData[$countyCode]['message'] = $message;
-                $judeteData[$countyCode]['phenomena'] = $alertBlock['phenomena'];
-                $judeteData[$countyCode]['alert_type'] = $alertBlock['type'];
-                $judeteData[$countyCode]['alert_code'] = $alertBlock['code'];
-                $judeteData[$countyCode]['interval'] = $alertBlock['interval'];
             }
         }
     }
     
-    // STEP 3: Extrage info GLOBALĂ (pentru popups)
-    preg_match('/COD\s+([A-Z]+)/i', $htmlContent, $codeMatch);
+    // STEP 3: Aplică INFORMARE la județele care nu au deja o alertă mai specifică
+    if ($informareBlock) {
+        foreach ($judeteData as $code => &$countyData) {
+            // Dacă nu are alertă sau are doar INFORMARE, aplică INFORMARE
+            if (empty($countyData['alert_type']) || $countyData['alert_type'] === 'INFORMARE') {
+                $message = $informareBlock['message'];
+                if (!empty($informareBlock['phenomena'])) {
+                    $message = $informareBlock['phenomena'] . (empty($message) ? '' : "\n\n" . $message);
+                }
+                
+                $countyData['message'] = $message;
+                $countyData['phenomena'] = $informareBlock['phenomena'];
+                $countyData['alert_type'] = $informareBlock['type'];
+                $countyData['alert_code'] = $informareBlock['code'];
+                $countyData['interval'] = $informareBlock['interval'];
+            }
+        }
+    }
+    
+    // STEP 4: Extrage info GLOBALĂ (pentru header)
+    preg_match('/COD\s+(GALBEN|PORTOCALIU|ROȘU)/i', $htmlContent, $codeMatch);
     $colorName = !empty($codeMatch[1]) ? strtolower($codeMatch[1]) : 'galben';
     
-    // Extrage fenomene GLOBALE
-    preg_match('/Fenomene vizate:\s*([^Z]*?)(?=Zone afectate:|Interval|$)/is', $htmlContent, $fenMatch);
+    // Extrage fenomene GLOBALE - din prima ATENȚIONARE sau INFORMARE
+    preg_match('/Fenomene vizate:\s*([^Z]*?)(?=Zone afectate:|Interval|COD|$)/is', $htmlContent, $fenMatch);
     $fenomene = !empty($fenMatch[1]) ? trim($fenMatch[1]) : 'conform textelor și hărții';
     
-    // Tipul alertei (din prima alertă cu ATENȚIONARE)
-    $typeName = 'Atenționare meteorologică';
-    if (preg_match('/INFORMARE/i', $htmlContent)) {
-        $typeName = 'Informare meteorologică';
+    // Tipul alertei - dacă avem ATENȚIONARE, acela e tipul principal
+    $typeName = 'Informare meteorologică';
+    if (preg_match('/ATENȚIONARE\s+METEOROLOGICĂ/i', $htmlContent)) {
+        $typeName = 'Atenționare meteorologică';
     }
     if (strpos(strtoupper($htmlContent), 'NOWCASTING') !== false) {
         $typeName = 'Atenționare nowcasting';
     }
     
-    // Parse interval global (prima ATENȚIONARE)
+    // Parse interval global - cauta PRIMA Interval de valabilitate
     preg_match('/Interval de valabilitate:\s*([^\n]*?(?:\d{1,2}\s+\w+,\s+ora\s+\d{2}:\d{2}[^,]*)+)/i', 
         $htmlContent, $intervalMatch);
     $intervalText = !empty($intervalMatch[1]) ? trim($intervalMatch[1]) : '';
@@ -639,48 +672,50 @@ function createMapHTML($alertsData) {
             onEachFeature: function(feature, layer) {
                 const props = feature.properties;
                 
-                // Construiește valabilitate - dacă avem interval per-county, nu mai arătăm start/end repetate
-                let validityHTML = '';
+                // Construiește valabilitate - complet cu toate informațiile disponibile
+                let dateHTML = '';
+                
                 if (props.interval) {
-                    validityHTML = `<td style="padding: 8px; font-size: 0.85em;">\${props.interval}</td>`;
+                    // Dacă avem interval specific per alert
+                    dateHTML = props.interval;
+                } else if (props.start && props.start !== 'N/A') {
+                    // Dacă avem date parseate
+                    dateHTML = (props.start || 'N/A') + '<br>' + (props.end || 'N/A');
                 } else {
-                    validityHTML = `<td style="padding: 8px; font-size: 0.85em;">
-                        \${props.start ? 'de la: \${props.start}<br>' : ''}
-                        \${props.end ? 'pana la: \${props.end}' : 'N/A'}
-                    </td>`;
+                    dateHTML = 'N/A';
                 }
                 
                 const popupContent = `
                     <div style="min-width: 320px; max-height: 500px; overflow-y: auto; font-family: Arial, sans-serif;">
-                        <h3 style="color: #667eea; margin-bottom: 12px; border-bottom: 2px solid #667eea; padding-bottom: 8px;">📍 Județ: \${props.code}</h3>
+                        <h3 style="color: #667eea; margin-bottom: 12px; border-bottom: 2px solid #667eea; padding-bottom: 8px;">📍 Județ: ${props.code}</h3>
                         
                         <table style="width: 100%; border-collapse: collapse; margin-bottom: 10px;">
                             <tr style="background: #f0f4ff;">
                                 <td style="padding: 8px; font-weight: bold; color: #764ba2; width: 40%;">🚨 Nivel:</td>
-                                <td style="padding: 8px;">\${props.alertLevel || 'N/A'}</td>
+                                <td style="padding: 8px;">${props.alertLevel || 'N/A'}</td>
                             </tr>
-                            \${props.alertCode ? `<tr>
+                            ${props.alertCode && props.alertCode !== 'necunoscut' ? `<tr>
                                 <td style="padding: 8px; font-weight: bold; color: #764ba2;">📌 Cod:</td>
-                                <td style="padding: 8px;">COD \${props.alertCode.toUpperCase()}</td>
+                                <td style="padding: 8px;">COD ${props.alertCode.toUpperCase()}</td>
                             </tr>` : ''}
                             <tr style="background: #f0f4ff;">
                                 <td style="padding: 8px; font-weight: bold; color: #764ba2;">📋 Tip Alert:</td>
-                                <td style="padding: 8px;">\${props.alertType || 'N/A'}</td>
+                                <td style="padding: 8px;">${props.alertType || 'N/A'}</td>
                             </tr>
-                            \${props.phenomena ? `<tr>
+                            ${props.phenomena ? `<tr>
                                 <td style="padding: 8px; font-weight: bold; color: #764ba2;">⚡ Fenomene:</td>
-                                <td style="padding: 8px;">\${props.phenomena}</td>
+                                <td style="padding: 8px;">${props.phenomena}</td>
                             </tr>` : ''}
                             <tr style="background: #f0f4ff;">
                                 <td style="padding: 8px; font-weight: bold; color: #764ba2;">⏰ Valabilitate:</td>
-                                \${validityHTML}
+                                <td style="padding: 8px; font-size: 0.85em;">${dateHTML}</td>
                             </tr>
                         </table>
                         
-                        \${props.message ? `<div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 5px; padding: 12px; margin-top: 10px;">
+                        ${props.message ? `<div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 5px; padding: 12px; margin-top: 10px;">
                             <p style="margin: 0 0 8px 0; font-weight: bold; color: #856404;">📝 Situația pentru acest județ:</p>
-                            <p style="margin: 0; font-size: 0.9em; line-height: 1.6; white-space: pre-wrap; word-break: break-word; color: #333;">\${props.message}</p>
-                        </div>` : '<p style="color: #666; font-size: 0.9em;">Nu sunt detalii suplimentare pentru acest județ.</p>'}
+                            <p style="margin: 0; font-size: 0.9em; line-height: 1.6; white-space: pre-wrap; word-break: break-word; color: #333;">${props.message}</p>
+                        </div>` : '<p style="color: #666; font-size: 0.9em;">ℹ️ Nu sunt alerte specifice pentru acest județ în această perioadă.</p>'}
                     </div>
                 `;
                 layer.bindPopup(popupContent, {maxWidth: 500, maxHeight: 500});
