@@ -516,12 +516,29 @@ function extractAlertData($data) {
         }
     }
     
+    // Detectează dacă e INFORMARE generală (pentru toată țara - fără județe specifice)
+    $isGeneralInformareOnly = false;
+    $hasAtentionare = false;
+    
+    foreach ($alertsBlocks as $block) {
+        if ($block['type'] === 'ATENȚIONARE') {
+            $hasAtentionare = true;
+            break;
+        }
+    }
+    
+    // Dacă avem doar INFORMARE fără județe specifice = INFORMARE generală
+    if (!$hasAtentionare && $informareBlock && empty($informareBlock['counties'])) {
+        $isGeneralInformareOnly = true;
+    }
+    
     $alertInfo = [
         'type' => $typeName,
         'color_name' => $colorName,
         'phenomena' => $fenomene,
         'start' => $dateStart,
         'end' => $dateEnd,
+        'general_informare' => $isGeneralInformareOnly,
     ];
     
     return [
@@ -550,53 +567,97 @@ function createMapHTML($alertsData) {
     
     $features = [];
     
-    foreach ($alertsData['counties'] as $code => $countyData) {
-        $colorCode = $countyData['color_code'] ?? '0';
-        $coordsGis = $countyData['coords_gis'] ?? '';
-        
-        // Skip verde
-        if ($colorCode === '0' || empty($coordsGis)) {
-            continue;
+    // Verifică dacă e INFORMARE generală
+    $isGeneralInformareOnly = $alertInfo['general_informare'] ?? false;
+    
+    if ($isGeneralInformareOnly) {
+        // INFORMARE GENERALĂ: Arată TOATE județele cu gri + contur accentuat
+        foreach ($alertsData['counties'] as $code => $countyData) {
+            $coordsGis = $countyData['coords_gis'] ?? '';
+            
+            if (empty($coordsGis)) {
+                continue;
+            }
+            
+            $polygons = parseMultipolygon($coordsGis);
+            
+            if (empty($polygons) || count($polygons[0]) < 3) {
+                continue;
+            }
+            
+            // Override cu culoare gri pentru INFORMARE generală
+            $features[] = [
+                'type' => 'Feature',
+                'properties' => [
+                    'code' => $code,
+                    'color' => '#999999', // Gri pentru INFORMARE generală
+                    'alertLevel' => 'INFORMARE Meteorologică Generală',
+                    'alertType' => $countyData['alert_type'] ?? 'INFORMARE',
+                    'alertCode' => $countyData['alert_code'] ?? '',
+                    'phenomena' => $countyData['phenomena'] ?? ($alertInfo['phenomena'] ?? ''),
+                    'interval' => $countyData['interval'] ?? '',
+                    'start' => $alertInfo['start'] ?? '',
+                    'end' => $alertInfo['end'] ?? '',
+                    'message' => $countyData['message'] ?? '',
+                    'isGeneral' => true,
+                ],
+                'geometry' => [
+                    'type' => 'Polygon',
+                    'coordinates' => [$polygons[0]]
+                ]
+            ];
         }
-        
-        $polygons = parseMultipolygon($coordsGis);
-        
-        if (empty($polygons) || count($polygons[0]) < 3) {
-            continue;
+    } else {
+        // ALERTE SPECIFICE: Arată doar județele cu alerte (colorCode != 0)
+        foreach ($alertsData['counties'] as $code => $countyData) {
+            $colorCode = $countyData['color_code'] ?? '0';
+            $coordsGis = $countyData['coords_gis'] ?? '';
+            
+            // Skip verde pentru alerte specifice
+            if ($colorCode === '0' || empty($coordsGis)) {
+                continue;
+            }
+            
+            $polygons = parseMultipolygon($coordsGis);
+            
+            if (empty($polygons) || count($polygons[0]) < 3) {
+                continue;
+            }
+            
+            $colorInfo = $colorMap[$colorCode] ?? $colorMap['0'];
+            
+            // Mesaj specific per județ (dacă există)
+            $countyMessage = $countyData['message'] ?? '';
+            
+            // Alert type si code: per-county dacă existază, altfel global
+            $alertType = !empty($countyData['alert_type']) ? $countyData['alert_type'] : ($alertInfo['type'] ?? '');
+            $alertCode = !empty($countyData['alert_code']) ? $countyData['alert_code'] : ($alertInfo['color_name'] ?? 'necunoscut');
+            $phenomena = !empty($countyData['phenomena']) ? $countyData['phenomena'] : ($alertInfo['phenomena'] ?? '');
+            $interval = !empty($countyData['interval']) ? $countyData['interval'] : '';
+            $dateStart = !empty($interval) ? $interval : ($alertInfo['start'] ?? '');
+            $dateEnd = $alertInfo['end'] ?? '';
+            
+            $features[] = [
+                'type' => 'Feature',
+                'properties' => [
+                    'code' => $code,
+                    'color' => $colorInfo['color'],
+                    'alertLevel' => $colorInfo['name'],
+                    'alertType' => $alertType,
+                    'alertCode' => $alertCode,
+                    'phenomena' => $phenomena,
+                    'interval' => $interval,
+                    'start' => $dateStart,
+                    'end' => $dateEnd,
+                    'message' => $countyMessage, // Mesaj per județ
+                    'isGeneral' => false,
+                ],
+                'geometry' => [
+                    'type' => 'Polygon',
+                    'coordinates' => [$polygons[0]]
+                ]
+            ];
         }
-        
-        $colorInfo = $colorMap[$colorCode] ?? $colorMap['0'];
-        
-        // Mesaj specific per județ (dacă există)
-        $countyMessage = $countyData['message'] ?? '';
-        
-        // Alert type si code: per-county dacă existază, altfel global
-        $alertType = !empty($countyData['alert_type']) ? $countyData['alert_type'] : ($alertInfo['type'] ?? '');
-        $alertCode = !empty($countyData['alert_code']) ? $countyData['alert_code'] : ($alertInfo['color_name'] ?? 'necunoscut');
-        $phenomena = !empty($countyData['phenomena']) ? $countyData['phenomena'] : ($alertInfo['phenomena'] ?? '');
-        $interval = !empty($countyData['interval']) ? $countyData['interval'] : '';
-        $dateStart = !empty($interval) ? $interval : ($alertInfo['start'] ?? '');
-        $dateEnd = $alertInfo['end'] ?? '';
-        
-        $features[] = [
-            'type' => 'Feature',
-            'properties' => [
-                'code' => $code,
-                'color' => $colorInfo['color'],
-                'alertLevel' => $colorInfo['name'],
-                'alertType' => $alertType,
-                'alertCode' => $alertCode,
-                'phenomena' => $phenomena,
-                'interval' => $interval,
-                'start' => $dateStart,
-                'end' => $dateEnd,
-                'message' => $countyMessage, // Mesaj per județ
-            ],
-            'geometry' => [
-                'type' => 'Polygon',
-                'coordinates' => [$polygons[0]]
-            ]
-        ];
     }
     
     $geojson = [
@@ -606,6 +667,27 @@ function createMapHTML($alertsData) {
     
     $currentTime = date('d.m.Y H:i');
     $geojsonStr = json_encode($geojson, JSON_UNESCAPED_UNICODE);
+    
+    // Creează lista de județe pentru dropdown (sortată alfabetic cu nume complete)
+    $countyNames = [
+        'AB' => 'Alba', 'AR' => 'Arad', 'AG' => 'Argeș', 'BC' => 'Bacău', 'BH' => 'Bihor',
+        'BN' => 'Bistrița-Năsăud', 'BT' => 'Botoșani', 'BV' => 'Brașov', 'BR' => 'Brăila',
+        'BZ' => 'Buzău', 'CS' => 'Caraș-Severin', 'CL' => 'Călărași', 'CJ' => 'Cluj',
+        'CT' => 'Constanța', 'CV' => 'Covasna', 'DB' => 'Dâmbovița', 'DJ' => 'Dolj',
+        'GL' => 'Galați', 'GJ' => 'Gorj', 'HR' => 'Harghita', 'HD' => 'Hunedoara',
+        'IL' => 'Ialomița', 'IS' => 'Iași', 'IF' => 'Ilfov', 'MM' => 'Maramureș',
+        'MH' => 'Mehedinți', 'MS' => 'Mureș', 'NT' => 'Neamț', 'OT' => 'Olt',
+        'PH' => 'Prahova', 'SM' => 'Satu Mare', 'SB' => 'Sibiu', 'SV' => 'Suceava',
+        'TR' => 'Teleorman', 'TM' => 'Timiș', 'TL' => 'Tulcea', 'VS' => 'Vaslui',
+        'VN' => 'Vrancea', 'B' => 'București'
+    ];
+    
+    asort($countyNames); // Sortare alfabetică
+    
+    $countyOptions = '<option value="">🗺️ Vezi toate județele cu alerte</option>';
+    foreach ($countyNames as $code => $name) {
+        $countyOptions .= "<option value=\"$code\">$name ($code)</option>";
+    }
     
     $html = <<<HTML
 <!DOCTYPE html>
@@ -649,6 +731,41 @@ function createMapHTML($alertsData) {
             margin-top: 20px;
             backdrop-filter: blur(10px);
         }
+        .county-selector {
+            background: white;
+            padding: 20px;
+            border-bottom: 3px solid #667eea;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        .county-selector label {
+            font-weight: bold;
+            color: #764ba2;
+            font-size: 1.1em;
+        }
+        .county-selector select {
+            padding: 12px 20px;
+            font-size: 1em;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            background: white;
+            color: #333;
+            cursor: pointer;
+            min-width: 250px;
+            transition: all 0.3s ease;
+        }
+        .county-selector select:hover {
+            border-color: #764ba2;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+        .county-selector select:focus {
+            outline: none;
+            border-color: #764ba2;
+            box-shadow: 0 0 0 3px rgba(118, 75, 162, 0.1);
+        }
         #map { width: 100%; height: 600px; }
         .footer {
             padding: 20px;
@@ -674,6 +791,13 @@ function createMapHTML($alertsData) {
             </div>
         </div>
         
+        <div class="county-selector">
+            <label for="countySelect">📍 Selectează Județul:</label>
+            <select id="countySelect">
+                $countyOptions
+            </select>
+        </div>
+        
         <div id="map"></div>
         
         <div class="footer">
@@ -687,6 +811,8 @@ function createMapHTML($alertsData) {
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
         const geojsonData = $geojsonStr;
+        let geoJsonLayer = null;
+        let allLayers = {};
         
         const map = L.map('map').setView([45.9432, 24.9668], 7);
         
@@ -695,86 +821,155 @@ function createMapHTML($alertsData) {
             maxZoom: 19
         }).addTo(map);
         
-        L.geoJSON(geojsonData, {
-            style: function(feature) {
-                return {
-                    fillColor: feature.properties.color,
-                    weight: 2,
-                    opacity: 1,
-                    color: '#333',
-                    fillOpacity: 0.6
-                };
-            },
-            onEachFeature: function(feature, layer) {
-                const props = feature.properties;
-                
-                // Construiește valabilitate - complet cu toate informațiile disponibile
-                let dateHTML = '';
-                
-                if (props.interval) {
-                    // Dacă avem interval specific per alert
-                    dateHTML = props.interval;
-                } else if (props.start && props.start !== 'N/A') {
-                    // Dacă avem date parseate
-                    dateHTML = (props.start || 'N/A') + '<br>' + (props.end || 'N/A');
-                } else {
-                    dateHTML = 'N/A';
+        // Creează popup-ul pentru un județ
+        function createPopup(props) {
+            let dateHTML = '';
+            if (props.interval) {
+                dateHTML = props.interval;
+            } else if (props.start && props.start !== 'N/A') {
+                dateHTML = (props.start || 'N/A') + '<br>' + (props.end || 'N/A');
+            } else {
+                dateHTML = 'N/A';
+            }
+            
+            return `
+                <div style="min-width: 320px; max-height: 500px; overflow-y: auto; font-family: Arial, sans-serif;">
+                    <h3 style="color: #667eea; margin-bottom: 12px; border-bottom: 2px solid #667eea; padding-bottom: 8px;">📍 Județ: \${props.code}</h3>
+                    
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 10px;">
+                        <tr style="background: #f0f4ff;">
+                            <td style="padding: 8px; font-weight: bold; color: #764ba2; width: 40%;">🚨 Nivel:</td>
+                            <td style="padding: 8px;">\${props.alertLevel || 'N/A'}</td>
+                        </tr>
+                        \${props.alertCode && props.alertCode !== 'necunoscut' ? `<tr>
+                            <td style="padding: 8px; font-weight: bold; color: #764ba2;">📌 Cod:</td>
+                            <td style="padding: 8px;">COD \${props.alertCode.toUpperCase()}</td>
+                        </tr>` : ''}
+                        <tr style="background: #f0f4ff;">
+                            <td style="padding: 8px; font-weight: bold; color: #764ba2;">📋 Tip Alert:</td>
+                            <td style="padding: 8px;">\${props.alertType || 'N/A'}</td>
+                        </tr>
+                        \${props.phenomena ? `<tr>
+                            <td style="padding: 8px; font-weight: bold; color: #764ba2;">⚡ Fenomene:</td>
+                            <td style="padding: 8px;">\${props.phenomena}</td>
+                        </tr>` : ''}
+                        <tr style="background: #f0f4ff;">
+                            <td style="padding: 8px; font-weight: bold; color: #764ba2;">⏰ Valabilitate:</td>
+                            <td style="padding: 8px; font-size: 0.85em;">\${dateHTML}</td>
+                        </tr>
+                    </table>
+                    
+                    \${props.message ? `<div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 5px; padding: 12px; margin-top: 10px;">
+                        <p style="margin: 0 0 8px 0; font-weight: bold; color: #856404;">📝 Mesaj Alertă:</p>
+                        <p style="margin: 0; font-size: 0.9em; line-height: 1.6; white-space: pre-wrap; word-break: break-word; color: #333;">\${props.message}</p>
+                    </div>` : '<p style="color: #666; font-size: 0.9em;">ℹ️ Nu sunt alerte specifice pentru acest județ în această perioadă.</p>'}
+                </div>
+            `;
+        }
+        
+        // Inițializează harta cu toate județele
+        function initializeMap() {
+            geoJsonLayer = L.geoJSON(geojsonData, {
+                style: function(feature) {
+                    const isGeneral = feature.properties.isGeneral || false;
+                    return {
+                        fillColor: feature.properties.color,
+                        weight: isGeneral ? 3 : 2, // Contur mai gros pentru INFORMARE generală
+                        opacity: 1,
+                        color: isGeneral ? '#000' : '#333', // Contur mai întunecat pentru INFORMARE generală
+                        fillOpacity: isGeneral ? 0.4 : 0.6
+                    };
+                },
+                onEachFeature: function(feature, layer) {
+                    const props = feature.properties;
+                    allLayers[props.code] = layer;
+                    
+                    layer.bindPopup(createPopup(props), {maxWidth: 500, maxHeight: 500});
+                    
+                    // Hover effect
+                    layer.on('mouseover', function() {
+                        this.setStyle({
+                            weight: 3,
+                            fillOpacity: 0.85,
+                            color: '#000'
+                        });
+                        this.bringToFront();
+                    });
+                    
+                    layer.on('mouseout', function() {
+                        const isGeneral = feature.properties.isGeneral || false;
+                        this.setStyle({
+                            weight: isGeneral ? 3 : 2,
+                            fillOpacity: isGeneral ? 0.4 : 0.6,
+                            color: isGeneral ? '#000' : '#333'
+                        });
+                    });
                 }
-                
-                const popupContent = `
-                    <div style="min-width: 320px; max-height: 500px; overflow-y: auto; font-family: Arial, sans-serif;">
-                        <h3 style="color: #667eea; margin-bottom: 12px; border-bottom: 2px solid #667eea; padding-bottom: 8px;">📍 Județ: \${props.code}</h3>
+            }).addTo(map);
+        }
+        
+        // Filtrează harta după județ selectat
+        function filterByCounty(countyCode) {
+            if (!countyCode) {
+                // Arată toate județele cu alerte
+                map.removeLayer(geoJsonLayer);
+                initializeMap();
+                map.setView([45.9432, 24.9668], 7);
+                return;
+            }
+            
+            // Găsește layer-ul pentru județul selectat
+            const selectedLayer = allLayers[countyCode];
+            
+            if (!selectedLayer) {
+                alert('Județul selectat nu are alerte active în acest moment.');
+                return;
+            }
+            
+            // Șterge layer-ul vechi
+            if (geoJsonLayer) {
+                map.removeLayer(geoJsonLayer);
+            }
+            
+            // Creează un nou layer doar cu județul selectat
+            const selectedFeature = geojsonData.features.find(f => f.properties.code === countyCode);
+            
+            if (selectedFeature) {
+                geoJsonLayer = L.geoJSON(selectedFeature, {
+                    style: function(feature) {
+                        return {
+                            fillColor: feature.properties.color,
+                            weight: 3,
+                            opacity: 1,
+                            color: '#000',
+                            fillOpacity: 0.7
+                        };
+                    },
+                    onEachFeature: function(feature, layer) {
+                        layer.bindPopup(createPopup(feature.properties), {maxWidth: 500, maxHeight: 500});
                         
-                        <table style="width: 100%; border-collapse: collapse; margin-bottom: 10px;">
-                            <tr style="background: #f0f4ff;">
-                                <td style="padding: 8px; font-weight: bold; color: #764ba2; width: 40%;">🚨 Nivel:</td>
-                                <td style="padding: 8px;">\${props.alertLevel || 'N/A'}</td>
-                            </tr>
-                            \${props.alertCode && props.alertCode !== 'necunoscut' ? `<tr>
-                                <td style="padding: 8px; font-weight: bold; color: #764ba2;">📌 Cod:</td>
-                                <td style="padding: 8px;">COD \${props.alertCode.toUpperCase()}</td>
-                            </tr>` : ''}
-                            <tr style="background: #f0f4ff;">
-                                <td style="padding: 8px; font-weight: bold; color: #764ba2;">📋 Tip Alert:</td>
-                                <td style="padding: 8px;">\${props.alertType || 'N/A'}</td>
-                            </tr>
-                            \${props.phenomena ? `<tr>
-                                <td style="padding: 8px; font-weight: bold; color: #764ba2;">⚡ Fenomene:</td>
-                                <td style="padding: 8px;">\${props.phenomena}</td>
-                            </tr>` : ''}
-                            <tr style="background: #f0f4ff;">
-                                <td style="padding: 8px; font-weight: bold; color: #764ba2;">⏰ Valabilitate:</td>
-                                <td style="padding: 8px; font-size: 0.85em;">\${dateHTML}</td>
-                            </tr>
-                        </table>
-                        
-                        \${props.message ? `<div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 5px; padding: 12px; margin-top: 10px;">
-                            <p style="margin: 0 0 8px 0; font-weight: bold; color: #856404;">📝 Situația pentru acest județ:</p>
-                            <p style="margin: 0; font-size: 0.9em; line-height: 1.6; white-space: pre-wrap; word-break: break-word; color: #333;">\${props.message}</p>
-                        </div>` : '<p style="color: #666; font-size: 0.9em;">ℹ️ Nu sunt alerte specifice pentru acest județ în această perioadă.</p>'}
-                    </div>
-                `;
-                layer.bindPopup(popupContent, {maxWidth: 500, maxHeight: 500});
+                        // Deschide popup-ul automat
+                        setTimeout(() => {
+                            layer.openPopup();
+                        }, 500);
+                    }
+                }).addTo(map);
                 
-                // Hover effect
-                layer.on('mouseover', function() {
-                    this.setStyle({
-                        weight: 3,
-                        fillOpacity: 0.85,
-                        color: '#000'
-                    });
-                    this.bringToFront();
-                });
-                
-                layer.on('mouseout', function() {
-                    this.setStyle({
-                        weight: 2,
-                        fillOpacity: 0.6,
-                        color: '#333'
-                    });
+                // Zoom pe județ
+                map.fitBounds(geoJsonLayer.getBounds(), {
+                    padding: [50, 50],
+                    maxZoom: 9
                 });
             }
-        }).addTo(map);
+        }
+        
+        // Event listener pentru dropdown
+        document.getElementById('countySelect').addEventListener('change', function(e) {
+            filterByCounty(e.target.value);
+        });
+        
+        // Inițializează harta la încărcare
+        initializeMap();
     </script>
 </body>
 </html>
