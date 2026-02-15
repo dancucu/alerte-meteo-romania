@@ -190,7 +190,33 @@ function fetchWeatherAlerts($cacheFile, $logFile) {
 }
 
 /**
- * Extrage date din răspuns
+ * Extrage mesaje specifice PER JUDEȚ din răspunsul API
+ * Dacă se gaseste o relație de mesaj per județ, va suprascrie mesajul global
+ */
+function extractPerCountyMessages($htmlContent) {
+    $perCountyMessages = [];
+    
+    // Pattern: cautam structuri unde avem cod județ + mesaj asociat
+    // Ex: "judet":"BR","mesaj":"Atenție..." sau similar
+    
+    // Încercă pattern 1: mesaj direct în objeto județului
+    preg_match_all('/"cod":"([A-Z]{2})"[^}]*"mesaj":"((?:[^"\\\\]|\\\\.)*)"/', $htmlContent, $matches, PREG_SET_ORDER);
+    
+    if (!empty($matches)) {
+        foreach ($matches as $match) {
+            $cod = $match[1];
+            $mesaj = $match[2];
+            // Curăță escape chars
+            $mesaj = str_replace(['\/', '\"', '\\n', '\\r'], ['/', '"', ' ', ' '], $mesaj);
+            $perCountyMessages[$cod] = $mesaj;
+        }
+    }
+    
+    return $perCountyMessages;
+}
+
+/**
+ * Extrage date din răspuns - PE JUDEȚE (mesaje separate)
  */
 function extractAlertData($data) {
     // Verifică dacă e fallback (HTML) sau API nou (JSON)
@@ -201,9 +227,19 @@ function extractAlertData($data) {
     }
     
     $judeteData = [];
+    $alertInfo = [];
     
-    // Pattern pentru județe
-    preg_match_all('/"cod":"([A-Z]{2})","culoare":"(\d+)","useCoordGis":"true","coordGis":"([^"]+)"/', $htmlContent, $matches, PREG_SET_ORDER);
+    // Extrage mesaje per județ
+    $perCountyMessages = extractPerCountyMessages($htmlContent);
+    
+    // Pattern pentru județe cu info completa
+    preg_match_all('/"judet_obiect":\{[^}]*"cod":"([A-Z]{2})"[^}]*"culoare":"(\d+)"[^}]*"useCoordGis":"true","coordGis":"([^"]+)"[^}]*\}/', $htmlContent, $matches, PREG_SET_ORDER);
+    
+    if (empty($matches)) {
+        // Fallback: pattern mai simplu
+        preg_match_all('/"cod":"([A-Z]{2})","culoare":"(\d+)","useCoordGis":"true","coordGis":"([^"]+)"/', $htmlContent, $matches, PREG_SET_ORDER);
+    }
+
     
     foreach ($matches as $match) {
         $cod = $match[1];
@@ -211,24 +247,27 @@ function extractAlertData($data) {
         $coordGis = $match[3];
         
         if (!isset($judeteData[$cod])) {
+            // Verifică dacă avem mesaj specific pentru acest județ
+            $countyMsg = $perCountyMessages[$cod] ?? '';
+            
             $judeteData[$cod] = [
                 'color_code' => $culoare,
-                'coords_gis' => $coordGis
+                'coords_gis' => $coordGis,
+                'message' => $countyMsg // Mesaj specific per județ (daca exista)
             ];
         }
     }
     
-    // Extrage info alertă
+    // Extrage info GLOBALĂ 
     preg_match('/"numeTipMesaj":"([^"]+)"/', $htmlContent, $tipMesaj);
     preg_match('/"numeCuloare":"([^"]+)"/', $htmlContent, $culoareNume);
     preg_match('/"fenomeneVizate":"([^"]+)"/', $htmlContent, $fenomene);
     preg_match('/"dataAparitiei":"([^"]+)"/', $htmlContent, $dataAparitie);
     preg_match('/"dataExpir[^"]*":"([^"]+)"/', $htmlContent, $dataExpirare);
     
-    // Încearcă să extrage mesajul din JSON
+    // Încearcă să extrage mesajul GLOBAL
     preg_match('/"mesaj":"((?:[^"\\\\]|\\\\.)*)"/', $htmlContent, $mesaj);
     
-    // Dacă nu e mesaj direct, extrage din "descriereRo" sau construiește din date
     if (empty($mesaj[1])) {
         preg_match('/"descriereRo":"((?:[^"\\\\]|\\\\.)*)"/', $htmlContent, $descriere);
         $mesajHtml = !empty($descriere[1]) ? $descriere[1] : '';
@@ -236,16 +275,24 @@ function extractAlertData($data) {
         $mesajHtml = $mesaj[1];
     }
     
-    // Curăță escape characters din mesaj
+    // Curăță escape characters
     if (!empty($mesajHtml)) {
         $mesajHtml = str_replace(['\/', '\"', '\\n', '\\r', '\n', '\r'], ['/', '"', ' ', ' ', ' ', ' '], $mesajHtml);
     }
     
-    // Dacă NU e mesaj deloc, construiește din fenomene + nivel
     if (empty($mesajHtml) && !empty($fenomene[1])) {
         $nivel = !empty($culoareNume[1]) ? $culoareNume[1] : 'Galben';
         $mesajHtml = "Nivel: " . $nivel . "\nFenomene: " . $fenomene[1];
     }
+    
+    // Pentru județele care NU au mesaj specific, adaugă mesajul GLOBAL
+    foreach (array_keys($judeteData) as $cod) {
+        if (empty($judeteData[$cod]['message'])) {
+            $judeteData[$cod]['message'] = $mesajHtml;
+        }
+    }
+    
+    // TODO: Pe viitor, parsam mesaji distincti pentru fiecare judet daca API le ofera
     
     return [
         'alert_count' => 1,
@@ -297,6 +344,9 @@ function createMapHTML($alertsData) {
         
         $colorInfo = $colorMap[$colorCode] ?? $colorMap['0'];
         
+        // Mesaj specific per județ (dacă există, altfel mesaj global)
+        $countyMessage = $countyData['message'] ?? $alertInfo['message'] ?? '';
+        
         $features[] = [
             'type' => 'Feature',
             'properties' => [
@@ -307,7 +357,7 @@ function createMapHTML($alertsData) {
                 'phenomena' => $alertInfo['phenomena'] ?? '',
                 'start' => $alertInfo['start'] ?? '',
                 'end' => $alertInfo['end'] ?? '',
-                'message' => $alertInfo['message'] ?? '',
+                'message' => $countyMessage, // Mesaj per județ
             ],
             'geometry' => [
                 'type' => 'Polygon',
